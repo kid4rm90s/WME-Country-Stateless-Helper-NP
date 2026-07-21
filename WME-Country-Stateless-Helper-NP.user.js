@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Country Stateless Helper NP
 // @namespace    https://greasyfork.org/users/1087400
-// @version      2.0.10
+// @version      2.1.0
 // @description  Detects when a Nepali city is assigned to a segment/venue and strips any auto-added state (e.g. Uttar Pradesh). Nepal has no states; this prevents cross-border state/country ID conflicts.
 // @author       https://greasyfork.org/en/users/1087400-kid4rm90s
 // @include      /^https:\/\/(www|beta)\.waze\.com\/(?!user\/)(.{2,6}\/)?editor\/?.*$/
