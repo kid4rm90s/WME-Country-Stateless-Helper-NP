@@ -1,19 +1,30 @@
 // ==UserScript==
-// @name         WME Nepal Spatial Address Guard
-// @namespace    https://greasyfork.org/en/users/your-profile
-// @version      2.0.7
+// @name         WME Country Stateless Helper NP
+// @namespace    https://greasyfork.org/users/1087400
+// @version      2.0.9
 // @description  Detects when a Nepali city is assigned to a segment/venue and strips any auto-added state (e.g. Uttar Pradesh). Nepal has no states; this prevents cross-border state/country ID conflicts.
-// @author       YourName
+// @author       https://greasyfork.org/en/users/1087400-kid4rm90s
 // @include      /^https:\/\/(www|beta)\.waze\.com\/(?!user\/)(.{2,6}\/)?editor\/?.*$/
 // @grant        GM_info
 // @grant        unsafeWindow
+// @grant        GM_xmlhttpRequest
+// @connect      raw.githubusercontent.com
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=waze.com
+// @require      https://greasyfork.org/scripts/560385/code/WazeToastr.js
+// @downloadURL https://raw.githubusercontent.com/kid4rm90s/WME-Country-Stateless-Helper-NP/main/WME-Country-Stateless-Helper-NP.user.js
+// @updateURL https://raw.githubusercontent.com/kid4rm90s/WME-Country-Stateless-Helper-NP/main/WME-Country-Stateless-Helper-NP.user.js
 // ==/UserScript==
 
-/* global getWmeSdk */
+/* global getWmeSdk, WazeToastr */
 (function () {
   'use strict';
+    const updateMessage = `<strong>Version 2.0.8 - 2026-07-21:</strong><br>
+    - Fixed issue with no-state ID resolution <br>`;
+  const scriptName = GM_info.script.name;
+  const scriptVersion = GM_info.script.version;
+  const downloadUrl = 'https://raw.githubusercontent.com/kid4rm90s/WME-Country-Stateless-Helper-NP/main/WME-Country-Stateless-Helper-NP.user.js';
+  const forumURL = 'https://github.com/kid4rm90s/WME-Country-Stateless-Helper-NP/issues';
 
-  const SCRIPT_NAME = GM_info.script.name;
   let wmeSDK;
   let nepalCountryId = null;
   /** State ID representing "no state" (default/empty state for countries without states) */
@@ -37,10 +48,10 @@
    * WME injects window.SDK_INITIALIZED (a Promise) on page load.
    * Wait for it, then call getWmeSdk() (which is synchronous).
    */
-  (unsafeWindow || window).SDK_INITIALIZED.then(() => {
+  unsafeWindow.SDK_INITIALIZED.then(() => {
     wmeSDK = getWmeSdk({
-      scriptId: 'NepalSpatialGuard',
-      scriptName: 'Nepal Spatial Address Guard',
+      scriptId: 'StatelessHelperNP',
+      scriptName: 'WME Country Stateless Helper NP',
     });
     bootstrap();
   });
@@ -62,6 +73,7 @@
     // State.isReady() is a method, not a property — must call it
     if (wmeSDK.State.isReady()) {
       init();
+      scriptupdatemonitor();
     } else {
       wmeSDK.Events.once({ eventName: 'wme-ready' }).then(init);
     }
@@ -76,7 +88,8 @@
     const nepal = countries.find((c) => c.name === 'Nepal');
 
     if (!nepal) {
-      console.warn(`${SCRIPT_NAME}: Nepal not found. Ensure map is centered on Nepal.`);
+      console.warn(`${scriptName}: Nepal not found. Ensure map is centered on Nepal.`);
+      WazeToastr.Alerts.warning(scriptName, 'Nepal not found. Ensure map is centered on Nepal.', false, false, 5000);
       return;
     }
     nepalCountryId = nepal.id;
@@ -99,10 +112,8 @@
     const nepalHasStates = wmeSDK.DataModel.States.hasNonDefaultStates() &&
       wmeSDK.DataModel.States.getAllWithoutDefault().some(s => s.countryId === nepalCountryId);
 
-    console.info(
-      `${SCRIPT_NAME}: Active — monitoring Nepal (ID ${nepalCountryId}). ` +
-      (nepalHasStates ? 'States detected.' : 'Stateless mode: stripping auto-added states.')
-    );
+    console.info(`${scriptName}: Active — monitoring Nepal (ID ${nepalCountryId}). ${nepalHasStates ? 'States detected.' : 'Stateless mode: stripping auto-added states.'}`);
+    WazeToastr.Alerts.info(scriptName, `Active — monitoring Nepal (ID ${nepalCountryId}). ${nepalHasStates ? 'States detected.' : 'Stateless mode: stripping auto-added states.'}`, false, false, 3000);
   }
 
   // ─── State Lookup ─────────────────────────────────────────────────────────
@@ -131,7 +142,7 @@
   //       : allStates.find((s) => !s.name || s.name === '')?.id ?? 0;
   //   }
   //   if (noStateId === 0) {
-  //     console.warn(`${SCRIPT_NAME}: No-state ID resolved to 0 — unexpected. State stripping may be unreliable.`);
+  //     console.warn(`${scriptName}: No-state ID resolved to 0 — unexpected. State stripping may be unreliable.`);
   //   }
   //   log(`No-state ID: ${noStateId}`);
   // }
@@ -155,7 +166,8 @@
     }
 
     if (noStateId === 0 || noStateId === null) {
-      console.warn(`${SCRIPT_NAME}: No-state ID resolved to ${noStateId} — Check if map data is fully loaded.`);
+      console.warn(`${scriptName}: No-state ID resolved to ${noStateId} — Check if map data is fully loaded.`);
+      WazeToastr.Alerts.warning(scriptName, `No-state ID resolved to ${noStateId} — Check if map data is fully loaded.`, false, false, 5000);
     }
     log(`Resolved No-state ID: ${noStateId}`);
   }
@@ -182,13 +194,16 @@
 
     if (needsFix) {
       const pendingCount = wmeSDK.Editing.getUnsavedChangesCount();
-      console.info(`${SCRIPT_NAME}: objects-saved cleanup — ${pendingCount} correction(s) pending. Saving...`);
+      console.info(`${scriptName}: objects-saved cleanup — ${pendingCount} correction(s) pending. Saving...`);
+      WazeToastr.Alerts.info(scriptName, `Corrections pending: ${pendingCount}. Saving...`, false, false, 3000);
 
       try {
         await wmeSDK.Editing.save();
-        console.info(`${SCRIPT_NAME}: objects-saved cleanup — Corrective save successful.`);
+        console.info(`${scriptName}: objects-saved cleanup — Corrective save successful.`);
+        WazeToastr.Alerts.success(scriptName, 'Corrective save successful.', false, false, 3000);
       } catch (e) {
-        console.error(`${SCRIPT_NAME}: objects-saved cleanup — Corrective save failed:`, e);
+        console.error(`${scriptName}: objects-saved cleanup — Corrective save failed:`, e);
+        WazeToastr.Alerts.error(scriptName, `Corrective save failed: ${e.message}`);
       }
     }
   }
@@ -212,7 +227,8 @@
     });
 
     if (fixCount > 0) {
-      console.info(`${SCRIPT_NAME}: objects-changed — Proactively intercepted ${fixCount} incorrect state(s).`);
+      console.info(`${scriptName}: objects-changed — Proactively intercepted ${fixCount} incorrect state(s).`);
+      // WazeToastr.Alerts.info(scriptName, `Proactively intercepted ${fixCount} incorrect state(s).`, false, false, 3000);
     }
   }
 
@@ -256,14 +272,14 @@
         ? wmeSDK.DataModel.Segments.getAddress({ segmentId: idValue })
         : wmeSDK.DataModel.Venues.getAddress({ venueId: idValue });
     } catch (e) {
-      console.info(`${SCRIPT_NAME}: Skip ${dataModelName} ${objectId}: getAddress failed (${e.message})`);
+      console.info(`${scriptName}: Skip ${dataModelName} ${objectId}: getAddress failed (${e.message})`);
       currentlyFixing.delete(fixKey);
       return false;
     }
 
     // No address or empty — nothing to check
     if (!address || address.isEmpty) {
-      console.info(`${SCRIPT_NAME}: Skip ${dataModelName} ${objectId}: no address`);
+      console.info(`${scriptName}: Skip ${dataModelName} ${objectId}: no address`);
       currentlyFixing.delete(fixKey);
       return false;
     }
@@ -272,7 +288,7 @@
     const addrCountryId = address.countryId ?? address.city?.countryId;
     if (!addrCountryId || addrCountryId !== nepalCountryId) {
       console.info(
-        `${SCRIPT_NAME}: Skip ${dataModelName} ${objectId}: not in Nepal` +
+        `${scriptName}: Skip ${dataModelName} ${objectId}: not in Nepal` +
           ` (countryId: ${addrCountryId ?? 'unknown'})`
       );
       currentlyFixing.delete(fixKey);
@@ -280,23 +296,26 @@
     }
 
     console.info(
-      `${SCRIPT_NAME}: ${dataModelName} ${objectId} current address:`,
+      `${scriptName}: ${dataModelName} ${objectId} current address:`,
       JSON.stringify(address, null, 2)
     );
 
     // No state set, or already set to no-state default — already correct
     if (!address.state || address.state.id === noStateId) {
-      console.info(`${SCRIPT_NAME}: Skip ${dataModelName} ${objectId}: already correct`);
+      console.info(`${scriptName}: Skip ${dataModelName} ${objectId}: already correct`);
       currentlyFixing.delete(fixKey);
       return false;
     }
 
     // ── FIX NEEDED: state set on an address in a stateless country ──
     console.info(
-      `${SCRIPT_NAME}: *** FIX TRIGGERED for ${dataModelName} ${objectId}` +
+      `${scriptName}: *** FIX TRIGGERED for ${dataModelName} ${objectId}` +
         ` — state "${address.state.name}" (ID ${address.state.id})` +
         ` set in stateless country, overriding with no-state (ID ${noStateId})`
     );
+    WazeToastr.Alerts.info(scriptName,
+      `Fix triggered for ${dataModelName}: state "${address.state.name}" → no-state.`,
+      false, false, 4000);
 
     // Build addressData preserving existing data, setting state to no-state
     // stateId and cityName are both required for raw address updates (SDK v2.359+).
@@ -325,10 +344,8 @@
       }
       return true;
     } catch (e) {
-      console.error(
-        `${SCRIPT_NAME}: Failed to fix address for ${dataModelName} ${objectId}`,
-        e
-      );
+      console.error(`${scriptName}: Failed to fix address for ${dataModelName} ${objectId}`, e);
+      WazeToastr.Alerts.error(scriptName, `Failed to fix address for ${dataModelName} ${objectId}: ${e.message}`);
       return false;
     } finally {
       currentlyFixing.delete(fixKey);
@@ -374,7 +391,35 @@
 
   function log(...args) {
     if (CONFIG.debug) {
-      console.log(`${SCRIPT_NAME}:`, ...args);
+      console.log(`${scriptName}:`, ...args);
     }
   }
+
+    function scriptupdatemonitor() {
+    if (WazeToastr?.Ready) {
+      // Create and start the ScriptUpdateMonitor
+      // For GitHub raw URLs, we need to specify metaUrl explicitly (same as downloadUrl for GitHub)
+      const updateMonitor = new WazeToastr.Alerts.ScriptUpdateMonitor(
+        scriptName,
+        scriptVersion,
+        downloadUrl,
+        GM_xmlhttpRequest,
+        downloadUrl, // metaUrl - for GitHub, use the same URL as it contains the @version tag
+        /@version\s+(.+)/i, // metaRegExp - extracts version from @version tag
+      );
+      updateMonitor.start(2, true); // Check every 2 hours, check immediately
+
+      // Show the update dialog for the current version
+      WazeToastr.Interface.ShowScriptUpdate(scriptName, scriptVersion, updateMessage, downloadUrl, forumURL);
+    } else {
+      setTimeout(scriptupdatemonitor, 250);
+    }
+  }
+
 })();
+
+/*Changelog*/
+/*
+<strong>Version 2.0.8 - 2026-07-21:</strong><br>
+    - Fixed issue with no-state ID resolution <br>
+*/
