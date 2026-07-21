@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Country Stateless Helper NP
 // @namespace    https://greasyfork.org/users/1087400
-// @version      2.0.8
+// @version      2.0.9
 // @description  Detects when a Nepali city is assigned to a segment/venue and strips any auto-added state (e.g. Uttar Pradesh). Nepal has no states; this prevents cross-border state/country ID conflicts.
 // @author       https://greasyfork.org/en/users/1087400-kid4rm90s
 // @include      /^https:\/\/(www|beta)\.waze\.com\/(?!user\/)(.{2,6}\/)?editor\/?.*$/
@@ -48,7 +48,7 @@
    * WME injects window.SDK_INITIALIZED (a Promise) on page load.
    * Wait for it, then call getWmeSdk() (which is synchronous).
    */
-  (unsafeWindow || window).SDK_INITIALIZED.then(() => {
+  unsafeWindow.SDK_INITIALIZED.then(() => {
     wmeSDK = getWmeSdk({
       scriptId: 'StatelessHelperNP',
       scriptName: 'WME Country Stateless Helper NP',
@@ -73,6 +73,7 @@
     // State.isReady() is a method, not a property — must call it
     if (wmeSDK.State.isReady()) {
       init();
+      scriptupdatemonitor();
     } else {
       wmeSDK.Events.once({ eventName: 'wme-ready' }).then(init);
     }
@@ -113,8 +114,6 @@
 
     console.info(`${scriptName}: Active — monitoring Nepal (ID ${nepalCountryId}). ${nepalHasStates ? 'States detected.' : 'Stateless mode: stripping auto-added states.'}`);
     WazeToastr.Alerts.info(scriptName, `Active — monitoring Nepal (ID ${nepalCountryId}). ${nepalHasStates ? 'States detected.' : 'Stateless mode: stripping auto-added states.'}`, false, false, 3000);
-
-    scriptupdatemonitor();
   }
 
   // ─── State Lookup ─────────────────────────────────────────────────────────
