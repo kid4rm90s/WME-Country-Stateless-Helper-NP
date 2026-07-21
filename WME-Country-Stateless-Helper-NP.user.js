@@ -297,10 +297,10 @@
       return false;
     }
 
-    console.info(
-      `${scriptName}: ${dataModelName} ${objectId} current address:`,
-      JSON.stringify(address, null, 2)
-    );
+    // console.info(
+    //   `${scriptName}: ${dataModelName} ${objectId} current address:`,
+    //   JSON.stringify(address, null, 2)
+    // );
 
     // No state set, or already set to no-state default — already correct
     if (!address.state || address.state.id === noStateId) {
