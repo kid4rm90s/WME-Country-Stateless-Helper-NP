@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Country Stateless Helper NP
 // @namespace    https://greasyfork.org/users/1087400
-// @version      2.1.1
+// @version      2.2.0
 // @description  Detects when a Nepali city is assigned to a segment/venue and strips any auto-added state (e.g. Uttar Pradesh). Nepal has no states; this prevents cross-border state/country ID conflicts.
 // @author       https://greasyfork.org/en/users/1087400-kid4rm90s
 // @include      /^https:\/\/(www|beta)\.waze\.com\/(?!user\/)(.{2,6}\/)?editor\/?.*$/
@@ -19,8 +19,9 @@
 /* global getWmeSdk, WazeToastr */
 (function () {
   'use strict';
-    const updateMessage = `<strong>Version 2.1.0 - 2026-07-21:</strong><br>
-    - Fixed issue with no-state ID resolution <br>`;
+    const updateMessage = `<strong>Version 2.2.0 - 2026-11-01:</strong><br>
+    - Migrated to WME SDK Async mode (mode: 'async') <br>
+    - DataModel / Editing / State calls are now awaited <br>`;
   const scriptName = GM_info.script.name;
   const scriptVersion = GM_info.script.version;
   const downloadUrl = 'https://raw.githubusercontent.com/kid4rm90s/WME-Country-Stateless-Helper-NP/main/WME-Country-Stateless-Helper-NP.user.js';
@@ -28,6 +29,8 @@
 
   let wmeSDK;
   let nepalCountryId = null;
+  /** Cached: true when Nepal defines its own states (resolved once in init) */
+  let nepalHasOwnStates = false;
   /** State ID representing "no state" (default/empty state for countries without states) */
   let noStateId = null;
   /** Set of "dataModelName:objectId" keys currently being fixed — prevents re-entrant loops */
@@ -54,6 +57,7 @@
     wmeSDK = getWmeSdk({
       scriptId: 'StatelessHelperNP',
       scriptName: 'WME Country Stateless Helper NP',
+      mode: 'async', // Opts into Async mode — all SDK module methods return Promises
     });
     bootstrap();
   });
@@ -61,10 +65,11 @@
   /**
    * Poll until the edit panel and top country are available,
    * then wait for wme-ready before full init.
+   * Async mode: DataModel / State calls return Promises.
    */
-  function bootstrap() {
+  async function bootstrap() {
     // Check for UI and essential DataModel availability
-    const topCountry = wmeSDK.DataModel.Countries.getTopCountry();
+    const topCountry = await wmeSDK.DataModel.Countries.getTopCountry();
     const editPanel = document.getElementById('edit-panel');
 
     if (!editPanel || !topCountry) {
@@ -72,8 +77,8 @@
       return;
     }
 
-    // State.isReady() is a method, not a property — must call it
-    if (wmeSDK.State.isReady()) {
+    // State.isReady() is a method, not a property — must call it (Promise in Async mode)
+    if (await wmeSDK.State.isReady()) {
       init();
       scriptupdatemonitor();
     } else {
@@ -83,10 +88,10 @@
 
   // ─── Initialization ───────────────────────────────────────────────────────
 
-  function init() {
+  async function init() {
     log('Ready');
 
-    const countries = wmeSDK.DataModel.Countries.getAll();
+    const countries = await wmeSDK.DataModel.Countries.getAll();
     const nepal = countries.find((c) => c.name === 'Nepal');
 
     if (!nepal) {
@@ -96,7 +101,7 @@
     }
     nepalCountryId = nepal.id;
 
-    resolveNoStateId();
+    await resolveNoStateId();
 
     // Enable tracking for relevant models
     wmeSDK.Events.trackDataModelEvents({ dataModelName: 'segments' });
@@ -111,8 +116,10 @@
     wmeSDK.Events.on({ eventName: 'wme-after-redo-clear', eventHandler: handleAfterRedoClear });
 
     // Future-proof check: Does Nepal now have its own states in WME?
-    const nepalHasStates = wmeSDK.DataModel.States.hasNonDefaultStates() &&
-      wmeSDK.DataModel.States.getAllWithoutDefault().some(s => s.countryId === nepalCountryId);
+    // Cached here so checkAndFixAddress() doesn't need to await it per object.
+    nepalHasOwnStates = (await wmeSDK.DataModel.States.hasNonDefaultStates()) &&
+      (await wmeSDK.DataModel.States.getAllWithoutDefault()).some(s => s.countryId === nepalCountryId);
+    const nepalHasStates = nepalHasOwnStates;
 
     console.info(`${scriptName}: Active — monitoring Nepal (ID ${nepalCountryId}). ${nepalHasStates ? 'States detected.' : 'Stateless mode: stripping auto-added states.'}`);
     WazeToastr.Alerts.info(scriptName, `Active — monitoring Nepal (ID ${nepalCountryId}). ${nepalHasStates ? 'States detected.' : 'Stateless mode: stripping auto-added states.'}`, false, false, 3000);
@@ -149,14 +156,14 @@
   //   log(`No-state ID: ${noStateId}`);
   // }
 
-    function resolveNoStateId() {
-    const allStates = wmeSDK.DataModel.States.getAll();
+    async function resolveNoStateId() {
+    const allStates = await wmeSDK.DataModel.States.getAll();
     
-    if (!wmeSDK.DataModel.States.hasNonDefaultStates()) {
+    if (!(await wmeSDK.DataModel.States.hasNonDefaultStates())) {
       // No states defined anywhere — the only state in the model IS the default
       noStateId = allStates.length > 0 ? allStates[0].id : 1; // Defaulting to 1 based on observation
     } else {
-      const nonDefault = wmeSDK.DataModel.States.getAllWithoutDefault();
+      const nonDefault = await wmeSDK.DataModel.States.getAllWithoutDefault();
       const nonDefaultIds = new Set(nonDefault.map((s) => s.id));
       
       // The default state is the one present in 'getAll' but NOT 'getAllWithoutDefault'
@@ -188,14 +195,14 @@
 
     let needsFix = false;
 
-    objectIds.forEach((objectId) => {
-      if (checkAndFixAddress(dataModelName, objectId)) {
+    for (const objectId of objectIds) {
+      if (await checkAndFixAddress(dataModelName, objectId)) {
         needsFix = true;
       }
-    });
+    }
 
     if (needsFix) {
-      const pendingCount = wmeSDK.Editing.getUnsavedChangesCount();
+      const pendingCount = await wmeSDK.Editing.getUnsavedChangesCount();
       console.info(`${scriptName}: objects-saved cleanup — ${pendingCount} correction(s) pending. Saving...`);
       WazeToastr.Alerts.info(scriptName, `Corrections pending: ${pendingCount}. Saving...`, false, false, 3000);
 
@@ -215,18 +222,24 @@
    * in the editor (before save). This is the primary defense, fixing the
    * address as soon as WME (or a script) incorrectly applies a state.
    */
-  function handleObjectsChanged(event) {
+  async function handleObjectsChanged(event) {
     const { dataModelName, objectIds, objects } = event;
 
     if (dataModelName !== 'segments' && dataModelName !== 'venues') return;
 
     let fixCount = 0;
 
-    objectIds.forEach((objectId) => {
-      if (checkAndFixAddress(dataModelName, objectId)) {
-        fixCount++;
+    try {
+      for (const objectId of objectIds) {
+        if (await checkAndFixAddress(dataModelName, objectId)) {
+          fixCount++;
+        }
       }
-    });
+    } catch (e) {
+      // Event handlers must never reject in Async mode
+      console.error(`${scriptName}: objects-changed handler failed:`, e);
+      return;
+    }
 
     if (fixCount > 0) {
       console.info(`${scriptName}: objects-changed — Proactively intercepted ${fixCount} incorrect state(s).`);
@@ -245,9 +258,9 @@
    *
    * @param {string} dataModelName - 'segments' | 'venues'
    * @param {string|number} objectId
-   * @returns {boolean} true if a fix was applied
+   * @returns {Promise<boolean>} true if a fix was applied
    */
-  function checkAndFixAddress(dataModelName, objectId) {
+  async function checkAndFixAddress(dataModelName, objectId) {
     if (!nepalCountryId || noStateId === null) return false;
 
     // Allow undo to complete without re-fixing the address
@@ -259,8 +272,8 @@
 
     // Check if Nepal specifically has its own states — not whether any country does.
     // India (country ID 101) has states like Uttar Pradesh, but Nepal does not.
-    if (wmeSDK.DataModel.States.hasNonDefaultStates() &&
-        wmeSDK.DataModel.States.getAllWithoutDefault().some(s => s.countryId === nepalCountryId)) {
+    // nepalHasOwnStates is resolved once in init() to avoid per-object SDK calls.
+    if (nepalHasOwnStates) {
       return false;
     }
 
@@ -271,8 +284,8 @@
 
     try {
       address = dataModelName === 'segments'
-        ? wmeSDK.DataModel.Segments.getAddress({ segmentId: idValue })
-        : wmeSDK.DataModel.Venues.getAddress({ venueId: idValue });
+        ? await wmeSDK.DataModel.Segments.getAddress({ segmentId: idValue })
+        : await wmeSDK.DataModel.Venues.getAddress({ venueId: idValue });
     } catch (e) {
       console.info(`${scriptName}: Skip ${dataModelName} ${objectId}: getAddress failed (${e.message})`);
       currentlyFixing.delete(fixKey);
@@ -332,7 +345,7 @@
 
     // Preserve alternate street IDs for segments
     if (dataModelName === 'segments') {
-      const seg = wmeSDK.DataModel.Segments.getById({ segmentId: idValue });
+      const seg = await wmeSDK.DataModel.Segments.getById({ segmentId: idValue });
       if (seg?.alternateStreetIds?.length) {
         addressData.alternateStreetIds = seg.alternateStreetIds;
       }
@@ -340,9 +353,9 @@
 
     try {
       if (dataModelName === 'segments') {
-        wmeSDK.DataModel.Segments.updateAddress({ segmentId: idValue, addressData });
+        await wmeSDK.DataModel.Segments.updateAddress({ segmentId: idValue, addressData });
       } else {
-        wmeSDK.DataModel.Venues.updateAddress({ venueId: idValue, addressData });
+        await wmeSDK.DataModel.Venues.updateAddress({ venueId: idValue, addressData });
       }
       return true;
     } catch (e) {
@@ -373,20 +386,25 @@
    * After redo or undo-stack clear, resume fixing normally.
    * Scan all visible objects to reapply the state fix if needed.
    */
-  function handleAfterRedoClear() {
+  async function handleAfterRedoClear() {
     clearTimeout(resumeFixingTimeout);
     suspendFixing = false;
 
-    // Re-scan all segments and venues on screen
-    ['segments', 'venues'].forEach((model) => {
-      const objects = model === 'segments'
-        ? wmeSDK.DataModel.Segments.getAll()
-        : wmeSDK.DataModel.Venues.getAll();
-      objects.forEach((obj) => {
-        const objectId = model === 'segments' ? obj.id : String(obj.id);
-        checkAndFixAddress(model, objectId);
-      });
-    });
+    try {
+      // Re-scan all segments and venues on screen (parallel — denser maps rescan faster)
+      for (const model of ['segments', 'venues']) {
+        const objects = model === 'segments'
+          ? await wmeSDK.DataModel.Segments.getAll()
+          : await wmeSDK.DataModel.Venues.getAll();
+        await Promise.all(objects.map((obj) => {
+          const objectId = model === 'segments' ? obj.id : String(obj.id);
+          return checkAndFixAddress(model, objectId);
+        }));
+      }
+    } catch (e) {
+      // Event handlers must never reject in Async mode
+      console.error(`${scriptName}: redo-clear rescan failed:`, e);
+    }
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────

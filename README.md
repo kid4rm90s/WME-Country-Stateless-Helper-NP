@@ -53,6 +53,7 @@ WME can sometimes auto-apply a state (like Uttar Pradesh, India) to segments and
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.2.0 | 2026-11-01 | Migrated to WME SDK Async mode (`mode: 'async'`) — all DataModel/Editing/State calls are awaited |
 | 2.0.9 | 2026-07-21 | Integrated WazeToastr notifications; moved script update monitor into wme-ready |
 | 2.0.8 | 2026-07-21 | Fixed no-state ID resolution |
 | 2.0.7 | — | Initial SDK migration, undo/redo safety |
